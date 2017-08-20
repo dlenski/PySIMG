@@ -21,6 +21,9 @@ img2simg converts raw disk images to Android's sparse image format. Features:
   Each of the images is pre- and post-padding with `DONT_CARE` blocks, to
   align with the full image size. (The only other publicly-available tool I know of that can do this
   is [SparseConverter](https://forum.xda-developers.com/showthread.php?t=2749797)).
+* It can replace real data patterns with `DONT_CARE` (e.g. `-D 00000000` or `-D FFFFFFFF`). This
+  should never be used on real images unless it is known that the image flash will be preceded by
+  `fastboot erase` or something else that leaves the whole memory in a known state.
 
 Available options:
 
@@ -34,10 +37,13 @@ optional arguments:
   -h, --help            show this help message and exit
   -b BLOCKSIZE, --blocksize BLOCKSIZE
                         Sparse block size (default 4096)
-  -o OUTPUT, --output OUTPUT
+  -o PATH, --output PATH
                         Output file (default is standard output)
   -S MiB, --split MiB   Split output into multiple sparse images of no more
                         than the specified size in MiB (= 2**20 bytes)
+  -D PATTERN, --dont-care PATTERN
+                        Hex pattern (e.g. FFFFFFFF) to treat as DONT_CARE; may
+                        be specified multiple times
   -d, --debug
 ```
 

@@ -2,7 +2,7 @@
 from __future__ import print_function, division
 from sys import stderr, stdout
 from functools import partial
-from binascii import hexlify
+from binascii import unhexlify
 from enum import IntEnum
 from struct import pack, unpack, calcsize
 from os import SEEK_CUR, SEEK_END, SEEK_SET, fstat
@@ -21,13 +21,14 @@ class SimgWriter(object):
     file_header_size = calcsize(file_header)
     chunk_header_size = calcsize(chunk_header)
 
-    def __init__(self, outf, start_block_offset = 0, end_block_offset = None, blocksize = 4096, debug = 0):
+    def __init__(self, outf, start_block_offset = 0, end_block_offset = None, blocksize = 4096, debug = 0, dont_care = ()):
         assert blocksize > 0
         assert blocksize % 4 == 0
 
         self.outf = outf
         self.blocksize = blocksize
         self.debug = debug
+        self.dont_care = dont_care
 
         self.nchunks = 0         # number of chunks written
         self.nblocks = 0         # number of blocks of data added
@@ -130,7 +131,11 @@ class SimgWriter(object):
         # determine correct chunk type
         cval = block[:4]
         if block == cval * (self.blocksize//4):
-            ctype = SparseChunkType.FILL
+            if cval in self.dont_care:
+                ctype = SparseChunkType.DONT_CARE
+                cval = None
+            else:
+                ctype = SparseChunkType.FILL
         else:
             ctype = SparseChunkType.RAW
             cval = None
@@ -171,12 +176,25 @@ class SimgWriter(object):
 
         return nblocks
 
+def power_of_2(val):
+    num = int(val)
+    if num<256 or (num & (num-1)):
+        raise ValueError
+    return num
+
+def hex_pattern(val):
+    val = unhexlify(val)
+    if len(val) not in (1,2,4):
+        raise ValueError
+    return val * (4//len(val))
+
 def parse_args(args=None):
     p = argparse.ArgumentParser()
     p.add_argument('img', type=argparse.FileType('rb'))
-    p.add_argument('-b', '--blocksize', default=4096, type=int, help='Sparse block size (default %(default)s)')
-    p.add_argument('-o', '--output', default=stdout, help='Output file (default is standard output)')
+    p.add_argument('-b', '--blocksize', default=4096, type=power_of_2, help='Sparse block size (default %(default)s)')
+    p.add_argument('-o', '--output', default=stdout, metavar='PATH', help='Output file (default is standard output)')
     p.add_argument('-S', '--split', default=None, type=int, metavar='MiB', help='Split output into multiple sparse images of no more than the specified size in MiB (= 2**20 bytes)')
+    p.add_argument('-D', '--dont-care', default=[], action='append', type=hex_pattern, metavar='PATTERN', help='Hex pattern (e.g. FFFFFFFF) to treat as DONT_CARE; may be specified multiple times')
     p.add_argument('-d', '--debug', action='count', default=0)
     args = p.parse_args()
     return p, args
@@ -201,7 +219,7 @@ def main():
             outf = args.output
 
         with outf:
-            wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug)
+            wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, dont_care=args.dont_care)
             for block in iter( partial(args.img.read, args.blocksize), b'' ):
                 wr.write(block)
             wr.close()
@@ -217,17 +235,17 @@ def main():
         start_block = split_number = 0
         wr = outf = None
 
-        for block in iter( partial(args.img.read, args.blocksize), b'' ):
+        for bb, block in enumerate(iter( partial(args.img.read, args.blocksize), b'' ), start_block):
             if not wr:
                 outf = open(args.output + '.split_%d' % split_number, 'wb')
-                wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, start_block_offset=start_block, end_block_offset=img_total_blocks)
+                wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, start_block_offset=start_block, end_block_offset=img_total_blocks, dont_care=args.dont_care)
 
             wr.write(block)
 
             # if writing one more block (might) exceed desired split size in MiB
             if ((wr.tell()+args.blocksize)>>20) >= args.split:
                 wr.close()
-                nrealblocks = wr.nblocks - wr.npadblocks
+                nrealblocks = bb - start_block
                 print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
                 outf.close()
 
@@ -237,7 +255,7 @@ def main():
         else:
             if wr:
                 wr.close()
-                nrealblocks = wr.nblocks - wr.npadblocks
+                nrealblocks = bb - start_block
                 print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
                 outf.close()
 
