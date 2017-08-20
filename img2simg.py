@@ -231,8 +231,10 @@ def main():
     done = False
 
     while not done:
-        if isinstance(args.output, str):
-            outf = open(args.output + ('.split_%d' % split_number if args.split else ''), 'wb')
+        if args.split:
+            outf = open(args.output + '.split_%d' % split_number, 'wb')
+        elif isinstance(args.output, str):
+            outf = open(args.output, 'wb')
         else:
             outf = args.output
 
