@@ -43,7 +43,7 @@ class SimgWriter(object):
 
         # leave room for file header, and write (optional) leading DONT_CARE blocks
         self.outf.write(b'\0' * self.file_header_size)
-        self._add_dont_care_blocks(self.start_block_offset)
+        self._add_pad_blocks(self.start_block_offset)
 
     def __enter__(self):
         self.outf.__enter__()
@@ -73,7 +73,7 @@ class SimgWriter(object):
         # write final unwritten chunk and (optional) trailing DONT_CARE chunk
         self._close_chunk()
         if self.end_block_offset != None:
-            self._add_dont_care_blocks(self.end_block_offset - self.nblocks)
+            self._add_pad_blocks(self.end_block_offset - self.nblocks)
             self._close_chunk()
 
         self.outf.seek(0, SEEK_SET)
@@ -114,8 +114,8 @@ class SimgWriter(object):
 
         self._print_state('bottom of _close_chunk: ', 1)
 
-    def _add_dont_care_blocks(self, n=1):
-        self._print_state('top _add_dont_care_blocks: ', 2)
+    def _add_pad_blocks(self, n=1):
+        self._print_state('top of _add_pad_blocks: ', 2)
 
         if self.buf:
             raise RuntimeError('%d leftover bytes (data written must be a multiple of blocksize %d)' % (len(self.buf), self.blocksize))
