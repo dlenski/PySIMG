@@ -41,6 +41,10 @@ class SimgWriter(object):
         self.csize = 0           # number of blocks in current chunk
         self.buf = b''
 
+        # leave room for file header, and write (optional) leading DONT_CARE blocks
+        self.outf.write(b'\0' * self.file_header_size)
+        self._add_dont_care_blocks(self.start_block_offset)
+
     def __enter__(self):
         self.outf.__enter__()
         return self
@@ -168,11 +172,6 @@ class SimgWriter(object):
     def write(self, data):
         nblocks = pp = 0
 
-        # leave room for file header, and write (optional) leading DONT_CARE blocks
-        if self.tell() == 0:
-            self.outf.write(b'\0' * self.file_header_size)
-            self._add_dont_care_blocks(self.start_block_offset)
-
         if self.buf:
             pp = self.blocksize - len(self.buf)
             self.buf += data[:pp]
@@ -226,6 +225,8 @@ def main():
     else:
         img_total_blocks = None
     	print('WARNING: Image is not a regular file; cannot verify that it is an exact multiple of --blocksize %d' % args.blocksize, file=stderr)
+        if args.split:
+            print('         Cannot pad split files with DONT_CARE blocks to total block size.', file=stderr)
 
     start_block = split_number = 0
     done = False
