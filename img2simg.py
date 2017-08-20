@@ -131,12 +131,12 @@ class SimgWriter(object):
         self.nblocks += n
         self.npadblocks += n
 
-        self._print_state('end _add_dont_care_blocks: ', 2)
+        self._print_state('bottom _add_pad_blocks: ', 2)
 
     def _add_data_block(self):
         self._print_state('   top of _add_data_block: ', 2)
 
-        block = self.buf
+        block, self.buf = self.buf, b''
         assert len(block) == self.blocksize
 
         # determine correct chunk type
@@ -165,7 +165,6 @@ class SimgWriter(object):
         self.cval = cval
         self.csize += 1
         self.nblocks += 1
-        self.buf = b''
 
         self._print_state('bottom of _add_data_block: ', 2)
 
