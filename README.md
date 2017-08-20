@@ -47,6 +47,14 @@ optional arguments:
   -d, --debug
 ```
 
+Disclaimer
+----------
+Use at your own risk.
+
+I've verified that this Python version outputs bit-identical images to the official `img2simg`
+for many real-world cases, when used in its default mode (no splitting or `DONT_CARE`
+replacement).
+
 Author
 ------
 &copy; Daniel Lenski <<dlenski@gmail.com>> (2014-2016)
