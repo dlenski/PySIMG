@@ -21,7 +21,7 @@ class SimgWriter(object):
     file_header_size = calcsize(file_header)
     chunk_header_size = calcsize(chunk_header)
 
-    def __init__(self, outf, blocksize = 4096, debug = 0):
+    def __init__(self, outf, start_block_offset = 0, end_block_offset = None, blocksize = 4096, debug = 0):
         assert blocksize > 0
         assert blocksize % 4 == 0
 
@@ -31,6 +31,7 @@ class SimgWriter(object):
 
         self.nchunks = 0         # number of chunks written
         self.nblocks = 0         # number of blocks of data added
+        self.npadblocks = 0      # number of DONT_CARE blocks added
 
         self.ctype = None        # SparseChunkType of current chunk
         self.cval = None         # fill or CRC32 value for current chunk
@@ -40,21 +41,28 @@ class SimgWriter(object):
         # leave room for file header
         outf.write(b'\0' * self.file_header_size)
 
+        # write leading DONT_CARE blocks, and save end_blocK-offset
+        self._add_dont_care_blocks(start_block_offset)
+        self.end_block_offset = end_block_offset
+
     def tell(self):
         return self.outf.tell()
 
     def _print_state(self, pfx, debug):
         if self.debug >= debug:
-            print("%snchunks=%d, nblocks=%d, ctype=%s, cval=%r, csize=%d, len(buf)=%d, tell()=%d" %
-                  (pfx, self.nchunks, self.nblocks, self.ctype and self.ctype.name, self.cval, self.csize, len(self.buf), self.tell()),
+            print("%snchunks=%d, nblocks=%d, npadblocks=%d, ctype=%s, cval=%r, csize=%d, len(buf)=%d, tell()=%d" %
+                  (pfx, self.nchunks, self.nblocks, self.npadblocks, self.ctype and self.ctype.name, self.cval, self.csize, len(self.buf), self.tell()),
                   file=stderr)
 
     def close(self):
         if self.buf:
             raise RuntimeError('%d leftover bytes (data written must be a multiple of blocksize %d)' % (len(self.buf), self.blocksize))
 
-        # write final unwritten chunk
+        # write final unwritten chunk and (optional) trailing DONT_CARE chunk
         self._close_chunk()
+        if self.end_block_offset != None:
+            self._add_dont_care_blocks(self.end_block_offset - self.nblocks)
+            self._close_chunk()
 
         self.outf.seek(0, SEEK_SET)
         self._print_state('  writing final header: ', 1)
@@ -93,6 +101,25 @@ class SimgWriter(object):
         self.nchunks += 1
 
         self._print_state('bottom of _close_chunk: ', 1)
+
+    def _add_dont_care_blocks(self, n=1):
+        self._print_state('top _add_dont_care_blocks: ', 2)
+
+        if self.buf:
+            raise RuntimeError('%d leftover bytes (data written must be a multiple of blocksize %d)' % (len(self.buf), self.blocksize))
+        if n <= 0:
+            return
+
+        if self.ctype != SparseChunkType.DONT_CARE:
+            self._close_chunk()
+
+        self.ctype = SparseChunkType.DONT_CARE
+        self.cval = None
+        self.csize += n
+        self.nblocks += n
+        self.npadblocks += n
+
+        self._print_state('end _add_dont_care_blocks: ', 2)
 
     def _add_data_block(self):
         self._print_state('   top of _add_data_block: ', 2)
@@ -147,7 +174,8 @@ class SimgWriter(object):
 p = argparse.ArgumentParser()
 p.add_argument('img', type=argparse.FileType('rb'))
 p.add_argument('-b', '--blocksize', default=4096, type=int, help='Sparse block size (default %(default)s)')
-p.add_argument('-o', '--output', type=argparse.FileType('wb'), default=stdout, help='Output file (default is standard output)')
+p.add_argument('-o', '--output', default=stdout, help='Output file (default is standard output)')
+p.add_argument('-S', '--split', default=None, type=int, metavar='MiB', help='Split output into multiple sparse images of no more than the specified size in MiB (= 2**20 bytes)')
 p.add_argument('-d', '--debug', action='count', default=0)
 args = p.parse_args()
 
@@ -160,12 +188,50 @@ else:
     img_total_blocks = None
     print('WARNING: Image is not a regular file; cannot verify that it is an exact multiple of --blocksize %d' % args.blocksize, file=stderr)
 
-with args.output:
-    wr = SimgWriter(args.output, blocksize=args.blocksize, debug=args.debug)
-    for block in iter( partial(args.img.read, args.blocksize), b'' ):
-        wr.write(block)
-    wr.close()
+if args.split == None:
 
-    print('Wrote %d blocks in %d sparse chunks (%d%% compression)' % (wr.nblocks, wr.nchunks, (args.output.tell()/(nblocks*args.blocksize))*100), file=stderr)
-    if img_total_blocks is not None:
-        assert wr.nblocks == img_total_blocks
+    if isinstance(args.output, str):
+        outf = open(args.output, "wb")
+    else:
+        outf = args.output
+
+    with outf:
+        wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug)
+        for block in iter( partial(args.img.read, args.blocksize), b'' ):
+            wr.write(block)
+        wr.close()
+
+        print('Wrote %d blocks in %d sparse chunks (%d%% compression)' % (wr.nblocks, wr.nchunks, (outf.tell()/(wr.nblocks*args.blocksize))*100), file=stderr)
+        if img_total_blocks is not None:
+            assert wr.nblocks == img_total_blocks
+
+else:
+    if not isinstance(args.output, str):
+        p.error('Must specify output filename prefix with --output to write split sparse images')
+
+    start_block = split_number = 0
+    wr = outf = None
+
+    for block in iter( partial(args.img.read, args.blocksize), b'' ):
+        if not wr:
+            outf = open(args.output + '.split_%d' % split_number, 'wb')
+            wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, start_block_offset=start_block, end_block_offset=img_total_blocks)
+
+        wr.write(block)
+
+        # if writing one more block (might) exceed desired split size in MiB
+        if ((wr.tell()+args.blocksize)>>20) >= args.split:
+            wr.close()
+            nrealblocks = wr.nblocks - wr.npadblocks
+            print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
+            outf.close()
+
+            start_block += nrealblocks
+            split_number += 1
+            wr = None
+    else:
+        if wr:
+            wr.close()
+            nrealblocks = wr.nblocks - wr.npadblocks
+            print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
+            outf.close()
