@@ -171,67 +171,75 @@ class SimgWriter(object):
 
         return nblocks
 
-p = argparse.ArgumentParser()
-p.add_argument('img', type=argparse.FileType('rb'))
-p.add_argument('-b', '--blocksize', default=4096, type=int, help='Sparse block size (default %(default)s)')
-p.add_argument('-o', '--output', default=stdout, help='Output file (default is standard output)')
-p.add_argument('-S', '--split', default=None, type=int, metavar='MiB', help='Split output into multiple sparse images of no more than the specified size in MiB (= 2**20 bytes)')
-p.add_argument('-d', '--debug', action='count', default=0)
-args = p.parse_args()
+def parse_args(args=None):
+    p = argparse.ArgumentParser()
+    p.add_argument('img', type=argparse.FileType('rb'))
+    p.add_argument('-b', '--blocksize', default=4096, type=int, help='Sparse block size (default %(default)s)')
+    p.add_argument('-o', '--output', default=stdout, help='Output file (default is standard output)')
+    p.add_argument('-S', '--split', default=None, type=int, metavar='MiB', help='Split output into multiple sparse images of no more than the specified size in MiB (= 2**20 bytes)')
+    p.add_argument('-d', '--debug', action='count', default=0)
+    args = p.parse_args()
+    return p, args
 
-st = fstat(args.img.fileno())
-if stat.S_ISREG(st.st_mode):
-    if st.st_size % args.blocksize != 0:
-        p.error('Image size is not an exact multiple of --blocksize %d' % args.blocksize)
-    img_total_blocks = st.st_size // args.blocksize
-else:
-    img_total_blocks = None
-    print('WARNING: Image is not a regular file; cannot verify that it is an exact multiple of --blocksize %d' % args.blocksize, file=stderr)
+def main():
+    p, args = parse_args()
 
-if args.split == None:
-
-    if isinstance(args.output, str):
-        outf = open(args.output, "wb")
+    st = fstat(args.img.fileno())
+    if stat.S_ISREG(st.st_mode):
+        if st.st_size % args.blocksize != 0:
+            p.error('Image size is not an exact multiple of --blocksize %d' % args.blocksize)
+        img_total_blocks = st.st_size // args.blocksize
     else:
-        outf = args.output
+        img_total_blocks = None
+    	print('WARNING: Image is not a regular file; cannot verify that it is an exact multiple of --blocksize %d' % args.blocksize, file=stderr)
 
-    with outf:
-        wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug)
+    if args.split == None:
+
+        if isinstance(args.output, str):
+            outf = open(args.output, "wb")
+        else:
+            outf = args.output
+
+        with outf:
+            wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug)
+            for block in iter( partial(args.img.read, args.blocksize), b'' ):
+                wr.write(block)
+            wr.close()
+
+            print('Wrote %d blocks in %d sparse chunks (%d%% compression)' % (wr.nblocks, wr.nchunks, (outf.tell()/(wr.nblocks*args.blocksize))*100), file=stderr)
+            if img_total_blocks is not None:
+                assert wr.nblocks == img_total_blocks
+
+    else:
+        if not isinstance(args.output, str):
+            p.error('Must specify output filename prefix with --output to write split sparse images')
+
+        start_block = split_number = 0
+        wr = outf = None
+
         for block in iter( partial(args.img.read, args.blocksize), b'' ):
+            if not wr:
+                outf = open(args.output + '.split_%d' % split_number, 'wb')
+                wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, start_block_offset=start_block, end_block_offset=img_total_blocks)
+
             wr.write(block)
-        wr.close()
 
-        print('Wrote %d blocks in %d sparse chunks (%d%% compression)' % (wr.nblocks, wr.nchunks, (outf.tell()/(wr.nblocks*args.blocksize))*100), file=stderr)
-        if img_total_blocks is not None:
-            assert wr.nblocks == img_total_blocks
+            # if writing one more block (might) exceed desired split size in MiB
+            if ((wr.tell()+args.blocksize)>>20) >= args.split:
+                wr.close()
+                nrealblocks = wr.nblocks - wr.npadblocks
+                print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
+                outf.close()
 
-else:
-    if not isinstance(args.output, str):
-        p.error('Must specify output filename prefix with --output to write split sparse images')
+                start_block += nrealblocks
+                split_number += 1
+                wr = None
+        else:
+            if wr:
+                wr.close()
+                nrealblocks = wr.nblocks - wr.npadblocks
+                print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
+                outf.close()
 
-    start_block = split_number = 0
-    wr = outf = None
-
-    for block in iter( partial(args.img.read, args.blocksize), b'' ):
-        if not wr:
-            outf = open(args.output + '.split_%d' % split_number, 'wb')
-            wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, start_block_offset=start_block, end_block_offset=img_total_blocks)
-
-        wr.write(block)
-
-        # if writing one more block (might) exceed desired split size in MiB
-        if ((wr.tell()+args.blocksize)>>20) >= args.split:
-            wr.close()
-            nrealblocks = wr.nblocks - wr.npadblocks
-            print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
-            outf.close()
-
-            start_block += nrealblocks
-            split_number += 1
-            wr = None
-    else:
-        if wr:
-            wr.close()
-            nrealblocks = wr.nblocks - wr.npadblocks
-            print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
-            outf.close()
+if __name__=='__main__':
+    main()
