@@ -26,6 +26,8 @@ class SimgWriter(object):
         assert blocksize % 4 == 0
 
         self.outf = outf
+        self.start_block_offset = start_block_offset
+        self.end_block_offset = end_block_offset
         self.blocksize = blocksize
         self.debug = debug
         self.dont_care = dont_care
@@ -39,12 +41,14 @@ class SimgWriter(object):
         self.csize = 0           # number of blocks in current chunk
         self.buf = b''
 
-        # leave room for file header
-        outf.write(b'\0' * self.file_header_size)
+    def __enter__(self):
+        self.outf.__enter__()
+        return self
 
-        # write leading DONT_CARE blocks, and save end_blocK-offset
-        self._add_dont_care_blocks(start_block_offset)
-        self.end_block_offset = end_block_offset
+    def __exit__(self, type, value, traceback):
+        self.close()
+        self.outf.__exit__(type, value, traceback)
+        return None
 
     def tell(self):
         return self.outf.tell()
@@ -160,6 +164,11 @@ class SimgWriter(object):
 
     def write(self, data):
         nblocks = pp = 0
+
+        # leave room for file header, and write (optional) leading DONT_CARE blocks
+        if self.tell() == 0:
+            self.outf.write(b'\0' * self.file_header_size)
+            self._add_dont_care_blocks(self.start_block_offset)
 
         if self.buf:
             pp = self.blocksize - len(self.buf)
