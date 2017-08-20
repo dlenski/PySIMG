@@ -53,6 +53,9 @@ class SimgWriter(object):
     def tell(self):
         return self.outf.tell()
 
+    def flush(self):
+        self._close_chunk();
+
     def _print_state(self, pfx, debug):
         if self.debug >= debug:
             print("%snchunks=%d, nblocks=%d, npadblocks=%d, ctype=%s, cval=%r, csize=%d, len(buf)=%d, tell()=%d" %
@@ -206,6 +209,10 @@ def parse_args(args=None):
     p.add_argument('-D', '--dont-care', default=[], action='append', type=hex_pattern, metavar='PATTERN', help='Hex pattern (e.g. FFFFFFFF) to treat as DONT_CARE; may be specified multiple times')
     p.add_argument('-d', '--debug', action='count', default=0)
     args = p.parse_args()
+
+    if args.split and not isinstance(args.output, str):
+        p.error('Must specify output filename prefix with --output to write split sparse images')
+
     return p, args
 
 def main():
@@ -220,53 +227,31 @@ def main():
         img_total_blocks = None
     	print('WARNING: Image is not a regular file; cannot verify that it is an exact multiple of --blocksize %d' % args.blocksize, file=stderr)
 
-    if args.split == None:
+    start_block = split_number = 0
+    done = False
 
+    while not done:
         if isinstance(args.output, str):
-            outf = open(args.output, "wb")
+            outf = open(args.output + ('.split_%d' % split_number if args.split else ''), 'wb')
         else:
             outf = args.output
 
-        with outf:
-            wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, dont_care=args.dont_care)
-            for block in iter( partial(args.img.read, args.blocksize), b'' ):
+        with SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, start_block_offset=start_block, end_block_offset=img_total_blocks, dont_care=args.dont_care) as wr:
+            for nb, block in enumerate(iter( partial(args.img.read, args.blocksize), b'' )):
                 wr.write(block)
-            wr.close()
 
-            print('Wrote %d blocks in %d sparse chunks (%d%% compression)' % (wr.nblocks, wr.nchunks, (outf.tell()/(wr.nblocks*args.blocksize))*100), file=stderr)
-            if img_total_blocks is not None:
-                assert wr.nblocks == img_total_blocks
+                if args.split and ((wr.tell()+args.blocksize)>>20) >= args.split:
+                    # writing one more block (might) exceed desired split size in MiB...
+                    break
+            else:
+                # we only reach this when we run out of input "naturally"...
+                done = True
 
-    else:
-        if not isinstance(args.output, str):
-            p.error('Must specify output filename prefix with --output to write split sparse images')
+            wr.flush()
+            print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nb, wr.nchunks, (wr.tell()/(nb*args.blocksize))*100), file=stderr)
 
-        start_block = split_number = 0
-        wr = outf = None
-
-        for bb, block in enumerate(iter( partial(args.img.read, args.blocksize), b'' ), start_block):
-            if not wr:
-                outf = open(args.output + '.split_%d' % split_number, 'wb')
-                wr = SimgWriter(outf, blocksize=args.blocksize, debug=args.debug, start_block_offset=start_block, end_block_offset=img_total_blocks, dont_care=args.dont_care)
-
-            wr.write(block)
-
-            # if writing one more block (might) exceed desired split size in MiB
-            if ((wr.tell()+args.blocksize)>>20) >= args.split:
-                wr.close()
-                nrealblocks = bb - start_block
-                print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
-                outf.close()
-
-                start_block += nrealblocks
-                split_number += 1
-                wr = None
-        else:
-            if wr:
-                wr.close()
-                nrealblocks = bb - start_block
-                print('%s: Wrote %d blocks in %d sparse chunks (%d%% compression)' % (outf.name, nrealblocks, wr.nchunks, (outf.tell()/(nrealblocks*args.blocksize))*100), file=stderr)
-                outf.close()
+            start_block += nb
+            split_number += 1
 
 if __name__=='__main__':
     main()
