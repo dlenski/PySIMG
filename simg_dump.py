@@ -116,12 +116,12 @@ def main():
       elif chunk_type == 0xCAC2:
         if data_sz != 4:
           print("Fill chunk should have 4 bytes of fill, but this has %u"
-                % (data_sz), end="")
+                % (data_sz))
           break;
         else:
           fill_bin = FH.read(4)
           fill = struct.unpack("<I", fill_bin)
-          print("Fill with 0x%08X" % (fill))
+          print("Fill with 0x%08X" % (fill), end="")
       elif chunk_type == 0xCAC3:
         if data_sz != 0:
           print("Don't care chunk input size is non-zero (%u)" % (data_sz))
@@ -131,14 +131,14 @@ def main():
       elif chunk_type == 0xCAC4:
         if data_sz != 4:
           print("CRC32 chunk should have 4 bytes of CRC, but this has %u"
-                % (data_sz), end="")
+                % (data_sz))
           break;
         else:
           crc_bin = FH.read(4)
           crc = struct.unpack("<I", crc_bin)
           print("Unverified CRC32 0x%08X" % (crc))
       else:
-          print("Unknown chunk type 0x%04X" % (chunk_type), end="")
+          print("Unknown chunk type 0x%04X" % (chunk_type))
           break;
 
       if verbose > 1:
