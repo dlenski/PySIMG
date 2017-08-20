@@ -1,7 +1,7 @@
 pysimg
 ======
 
-Pure-python tools for handling Android
+Pure-Python tools for handling Android
 [`fastboot`](https://en.wikipedia.org/wiki/Android_software_development#Fastboot)'s [sparse image
 format](http://www.2net.co.uk/tutorial/android-sparse-image-format).
 
@@ -15,7 +15,7 @@ img2simg converts raw disk images to Android's sparse image format. Features:
 
 * Unlike [the official `img2simg`](https://android.googlesource.com/platform/system/core/+/master/libsparse/img2simg.c),
   this version doesn't `seek` in the input file, so it can be used (for example) to sparsify a
-  raw disk image streamed from a decompression.
+  raw disk image streamed from a decompressor.
 * It can split images into multiple sparse images of no more than a certain size
   (specified in [MiB](https://en.wikipedia.org/wiki/Mebibyte) with `--split MiB`).
   Each of the images is pre- and post-padding with `DONT_CARE` blocks, to
