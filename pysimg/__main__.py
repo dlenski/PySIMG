@@ -11,7 +11,7 @@ from .writer import SimgWriter
 
 def power_of_2(val):
     num = int(val)
-    if num<256 or (num & (num-1)):
+    if num<16 or num>=0x100000 or (num & (num-1)):
         raise ValueError
     return num
 
