@@ -57,7 +57,7 @@ replacement).
 
 Author
 ------
-&copy; Daniel Lenski <<dlenski@gmail.com>> (2014-2016)
+&copy; Daniel Lenski <<dlenski@gmail.com>> (2017)
 
 License
 -------
