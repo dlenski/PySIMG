@@ -8,8 +8,8 @@ format](http://www.2net.co.uk/tutorial/android-sparse-image-format).
 Essentially, the sparse image format is a _very simple_ form of compression which can skip
 over unpopulated space in images (`DONT_CARE`) or repeated 4-byte sequences (`FILL`).
 
-`img2simg.py`
-=============
+`img2simg`
+==========
 
 img2simg converts raw disk images to Android's sparse image format. Features:
 
@@ -28,7 +28,7 @@ img2simg converts raw disk images to Android's sparse image format. Features:
 Available options:
 
 ```
-usage: img2simg.py [-h] [-b BLOCKSIZE] [-o OUTPUT] [-S MiB] [-d] img
+usage: img2simg [-h] [-b BLOCKSIZE] [-o OUTPUT] [-S MiB] [-d] img
 
 positional arguments:
   img
